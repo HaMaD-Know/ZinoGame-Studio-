@@ -1,0 +1,342 @@
+# ZinoGame Studio — iOS build
+#
+# Produces, depending on configuration:
+#   A. Unsigned device build (.ipa) and a Simulator build — always, no secrets needed.
+#      An unsigned .ipa can NOT be installed on an iPad as-is (see docs/IOS_BUILD.md).
+#   B. Signed, device-installable .ipa — when signing secrets are configured
+#      (export method development / ad-hoc / enterprise).
+#   C. App Store / TestFlight .ipa — when signing secrets are configured and
+#      the export method is app-store-connect.
+#
+# Trigger it from an iPad: GitHub app or github.com → Actions → "iOS Build" → Run workflow.
+# Download: open the finished run → Artifacts → "zinogame-studio-ios-build".
+
+name: iOS Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: Xcode build configuration
+        type: choice
+        options: [Release, Debug]
+        default: Release
+      export_method:
+        description: "Signed export method (used only when signing secrets exist)"
+        type: choice
+        options: [ad-hoc, development, app-store-connect, enterprise]
+        default: ad-hoc
+      xcode_version:
+        description: "Xcode version to use, e.g. 16.4 (empty = newest stable on the runner)"
+        type: string
+        default: ''
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'docs/**']
+  pull_request:
+    paths-ignore: ['**/*.md', 'docs/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  checks:
+    name: Web checks (types, lint, tests, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies (from lockfile)
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit and integration tests
+        run: npm test
+
+      - name: Production web build
+        run: npm run build:web
+
+      - name: Validate Capacitor and iOS project configuration
+        run: npm run check:capacitor
+
+      - name: Upload web build
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: zinogame-studio-web-build
+          path: dist/
+          retention-days: 14
+          if-no-files-found: error
+
+  ios:
+    name: iOS build (Xcode on macOS)
+    needs: checks
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      CONFIGURATION: ${{ inputs.configuration || 'Release' }}
+      EXPORT_METHOD: ${{ inputs.export_method || vars.IOS_EXPORT_METHOD || 'ad-hoc' }}
+      XCODE_VERSION: ${{ inputs.xcode_version || vars.IOS_XCODE_VERSION || '' }}
+      # Secrets cannot be used in `if:` directly; expose only whether they exist.
+      HAS_SIGNING: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 != '' && secrets.IOS_PROVISIONING_PROFILE_BASE64 != '' }}
+      PROJECT: ios/App/App.xcodeproj
+      SCHEME: App
+      BUILD_DIR: ${{ github.workspace }}/build-output
+    steps:
+      - name: Check out
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies (from lockfile)
+        run: npm ci
+
+      - name: Build web app
+        run: npm run build:web
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          echo "Installed Xcode versions:"
+          ls -d /Applications/Xcode*.app || true
+          if [ -n "$XCODE_VERSION" ]; then
+            CANDIDATE="/Applications/Xcode_${XCODE_VERSION}.app"
+            if [ ! -d "$CANDIDATE" ]; then
+              echo "::error title=Xcode not found::Xcode $XCODE_VERSION is not installed on this runner. Leave xcode_version empty to use the newest one."
+              exit 1
+            fi
+          else
+            # Newest stable Xcode (skip betas and release candidates).
+            CANDIDATE=$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|rc|release_candidate' | sed -E 's#.*/Xcode_([0-9.]+)\.app#\1 &#' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1 | cut -d' ' -f2)
+          fi
+          echo "Using $CANDIDATE"
+          sudo xcode-select -s "$CANDIDATE/Contents/Developer"
+          xcodebuild -version
+          echo "XCODE_PATH=$CANDIDATE" >> "$GITHUB_ENV"
+
+      - name: Sync Capacitor iOS project
+        run: npx cap sync ios
+
+      - name: Compute version numbers
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          echo "MARKETING_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          echo "App version $VERSION ($GITHUB_RUN_NUMBER)"
+
+      - name: Resolve Swift packages
+        run: |
+          set -euo pipefail
+          xcodebuild -resolvePackageDependencies -project "$PROJECT" -scheme "$SCHEME" -clonedSourcePackagesDirPath "$BUILD_DIR/spm"
+
+      - name: Build for iOS Simulator
+        run: |
+          set -euo pipefail
+          scripts/ci/xcodebuild-logged.sh "$BUILD_DIR-logs/simulator.log" build \
+            -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIGURATION" \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$BUILD_DIR/sim" \
+            -clonedSourcePackagesDirPath "$BUILD_DIR/spm" \
+            MARKETING_VERSION="$MARKETING_VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            CODE_SIGNING_ALLOWED=NO
+          APP=$(find "$BUILD_DIR/sim/Build/Products" -maxdepth 2 -name 'App.app' -type d | head -1)
+          test -n "$APP"
+          mkdir -p "$BUILD_DIR/artifacts"
+          (cd "$(dirname "$APP")" && zip -qry "$BUILD_DIR/artifacts/ZinoGameStudio-simulator.app.zip" App.app)
+
+      - name: Build unsigned device archive
+        if: env.HAS_SIGNING != 'true'
+        run: |
+          set -euo pipefail
+          scripts/ci/xcodebuild-logged.sh "$BUILD_DIR-logs/device.log" archive \
+            -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIGURATION" \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$BUILD_DIR/ZinoGameStudio.xcarchive" \
+            -derivedDataPath "$BUILD_DIR/device" \
+            -clonedSourcePackagesDirPath "$BUILD_DIR/spm" \
+            MARKETING_VERSION="$MARKETING_VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Package unsigned IPA
+        if: env.HAS_SIGNING != 'true'
+        run: |
+          set -euo pipefail
+          APP="$BUILD_DIR/ZinoGameStudio.xcarchive/Products/Applications/App.app"
+          test -d "$APP"
+          mkdir -p "$BUILD_DIR/ipa/Payload" "$BUILD_DIR/artifacts"
+          cp -R "$APP" "$BUILD_DIR/ipa/Payload/"
+          (cd "$BUILD_DIR/ipa" && zip -qry "$BUILD_DIR/artifacts/ZinoGameStudio-unsigned.ipa" Payload)
+          echo "SIGNING_STATE=unsigned" >> "$GITHUB_ENV"
+
+      - name: Install signing certificate and provisioning profile
+        if: env.HAS_SIGNING == 'true'
+        env:
+          CERTIFICATE_P12_BASE64: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+          TEAM_ID_OVERRIDE: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/zinogame-signing.keychain-db"
+          KC_PASS="${KEYCHAIN_PASSWORD:-$(uuidgen)}"
+          echo "::add-mask::$KC_PASS"
+          echo "$CERTIFICATE_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          echo "$PROVISIONING_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
+          security create-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KC_PASS" "$KEYCHAIN" > /dev/null
+          security list-keychain -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/"//g')
+          security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" > "$RUNNER_TEMP/profile.plist"
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")
+          TEAM_ID=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$RUNNER_TEMP/profile.plist")
+          for DIR in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$DIR"
+            cp "$RUNNER_TEMP/profile.mobileprovision" "$DIR/$PROFILE_UUID.mobileprovision"
+          done
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -oE '"[^"]+"' | head -1 | tr -d '"')
+          if [ -z "$IDENTITY" ]; then
+            echo "::error title=Signing::No code-signing identity found in the certificate. Check IOS_CERTIFICATE_P12_BASE64 and IOS_CERTIFICATE_PASSWORD."
+            exit 1
+          fi
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          echo "TEAM_ID=${TEAM_ID_OVERRIDE:-$TEAM_ID}" >> "$GITHUB_ENV"
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          rm -f "$RUNNER_TEMP/cert.p12"
+          echo "Signing with identity '$IDENTITY', profile '$PROFILE_NAME', team $TEAM_ID"
+
+      - name: Build signed archive and export IPA
+        if: env.HAS_SIGNING == 'true'
+        run: |
+          set -euo pipefail
+          BUNDLE_ID=$(node -p "require('./ios/App/App/capacitor.config.json').appId")
+          scripts/ci/xcodebuild-logged.sh "$BUILD_DIR-logs/device.log" archive \
+            -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIGURATION" \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$BUILD_DIR/ZinoGameStudio.xcarchive" \
+            -derivedDataPath "$BUILD_DIR/device" \
+            -clonedSourcePackagesDirPath "$BUILD_DIR/spm" \
+            MARKETING_VERSION="$MARKETING_VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_IDENTITY="$SIGN_IDENTITY" PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN"
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>${EXPORT_METHOD}</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict><key>${BUNDLE_ID}</key><string>${PROFILE_NAME}</string></dict>
+            <key>compileBitcode</key><false/>
+            <key>stripSwiftSymbols</key><true/>
+          </dict>
+          </plist>
+          PLIST
+          plutil -lint "$RUNNER_TEMP/ExportOptions.plist"
+          scripts/ci/xcodebuild-logged.sh "$BUILD_DIR-logs/export.log" -exportArchive \
+            -archivePath "$BUILD_DIR/ZinoGameStudio.xcarchive" \
+            -exportPath "$BUILD_DIR/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+          mkdir -p "$BUILD_DIR/artifacts"
+          cp "$BUILD_DIR"/export/*.ipa "$BUILD_DIR/artifacts/ZinoGameStudio-${EXPORT_METHOD}.ipa"
+          echo "SIGNING_STATE=signed-${EXPORT_METHOD}" >> "$GITHUB_ENV"
+
+      - name: Describe the artifacts
+        if: always()
+        run: |
+          mkdir -p "$BUILD_DIR/artifacts"
+          {
+            echo "ZinoGame Studio iOS build"
+            echo "========================="
+            echo "Version:        ${MARKETING_VERSION:-?} (build ${BUILD_NUMBER:-?})"
+            echo "Commit:         $GITHUB_SHA"
+            echo "Configuration:  $CONFIGURATION"
+            echo "Xcode:          $(xcodebuild -version 2>/dev/null | head -1)"
+            echo "Signing:        ${SIGNING_STATE:-not produced}"
+            echo
+            if [ "${SIGNING_STATE:-}" = "unsigned" ]; then
+              echo "ZinoGameStudio-unsigned.ipa is NOT signed and cannot be installed on an iPad as-is."
+              echo "It proves the native build works. To install on a device, either re-sign it with your"
+              echo "own Apple Developer certificate and a provisioning profile that includes the device,"
+              echo "or add the signing secrets described in docs/IOS_BUILD.md and run the workflow again."
+            fi
+            echo
+            echo "ZinoGameStudio-simulator.app.zip runs in the iOS Simulator on a Mac (xcrun simctl install booted App.app)."
+          } > "$BUILD_DIR/artifacts/README.txt"
+          ls -la "$BUILD_DIR/artifacts"
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: zinogame-studio-ios-build
+          path: build-output/artifacts/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: zinogame-studio-ios-logs
+          path: build-output-logs/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## ZinoGame Studio iOS build"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Version | ${MARKETING_VERSION:-?} (${BUILD_NUMBER:-?}) |"
+            echo "| Configuration | $CONFIGURATION |"
+            echo "| Xcode | $(xcodebuild -version 2>/dev/null | head -1) |"
+            echo "| Signing | ${SIGNING_STATE:-not produced} |"
+            echo
+            if [ "${SIGNING_STATE:-}" = "unsigned" ]; then
+              echo "> **Unsigned build.** The \`.ipa\` in the artifact cannot be installed on an iPad without signing."
+              echo "> Add the signing secrets (see \`docs/IOS_BUILD.md\`) to get an installable build."
+            fi
+            echo
+            echo "Download from the **Artifacts** section of this run: \`zinogame-studio-ios-build\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove signing keychain
+        if: always()
+        run: |
+          if [ -n "${KEYCHAIN:-}" ] && [ -f "$KEYCHAIN" ]; then security delete-keychain "$KEYCHAIN" || true; fi
+          rm -f "$RUNNER_TEMP/profile.mobileprovision" "$RUNNER_TEMP/profile.plist" "$RUNNER_TEMP/ExportOptions.plist"

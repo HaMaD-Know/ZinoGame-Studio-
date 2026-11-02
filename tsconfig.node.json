@@ -14,7 +14,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "types": ["node"]
+    "types": ["node", "vitest/globals"]
   },
-  "include": ["vite.config.ts", "capacitor.config.ts", "playwright.config.ts", "e2e"]
+  "include": ["vite.config.ts", "capacitor.config.ts", "playwright.config.ts", "e2e", "tests"]
 }
