@@ -99,7 +99,7 @@ export function createOutlineMaterial(color: string, width: number): MeshBasicMa
     shader.uniforms.outlineWidth = material.userData.outlineWidth as { value: number };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nuniform float outlineWidth;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += normalize(objectNormal) * outlineWidth;');
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += normalize(normal) * outlineWidth;');
   };
   material.customProgramCacheKey = () => 'zino-outline';
   return material;

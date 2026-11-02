@@ -198,3 +198,26 @@ test.describe('Assets', () => {
     await expect(page.getByText(/Export your model as .glb/)).toBeVisible();
   });
 });
+
+test.describe('Examples render cleanly', () => {
+  for (const example of ['Coin Collector', 'Physics Party', 'Toon Garden']) {
+    test(`${example} opens and plays without console or shader errors`, async ({ page }) => {
+      test.skip(test.info().project.name !== 'desktop-chromium', 'covered once');
+      const problems: string[] = [];
+      page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+      page.on('console', (m) => {
+        // three.js reports shader compile failures as warnings/errors.
+        if (m.type() === 'error' || /THREE\.WebGL(Program|Shader)/.test(m.text())) problems.push(`${m.type()}: ${m.text().slice(0, 300)}`);
+      });
+      await page.goto('/');
+      await page.getByRole('button', { name: new RegExp(example) }).first().click();
+      await expect(page.getByTestId('editor-workspace')).toBeVisible();
+      await page.waitForTimeout(2000);
+      await page.getByTestId('play-button').click();
+      await expect(page.getByTestId('play-overlay')).toBeVisible({ timeout: 30_000 });
+      await page.waitForTimeout(1500);
+      await page.getByTestId('stop-button').click();
+      expect(problems).toEqual([]);
+    });
+  }
+});
