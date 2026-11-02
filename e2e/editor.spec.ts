@@ -135,3 +135,66 @@ test.describe('ZinoGame Studio editor', () => {
     await expect(page.getByText('Ready to run')).toBeVisible();
   });
 });
+
+/** A minimal valid GLB (one triangle). */
+function triangleGlb(): Buffer {
+  const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 2, 0]);
+  const bin = Buffer.from(positions.buffer);
+  const json = {
+    asset: { version: '2.0' },
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ mesh: 0, name: 'Tri' }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+    buffers: [{ byteLength: bin.length }],
+    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: bin.length }],
+    accessors: [{ bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 2, 0] }],
+  };
+  let jsonBuf = Buffer.from(JSON.stringify(json));
+  jsonBuf = Buffer.concat([jsonBuf, Buffer.alloc((4 - (jsonBuf.length % 4)) % 4, 0x20)]);
+  const header = Buffer.alloc(12);
+  header.writeUInt32LE(0x46546c67, 0);
+  header.writeUInt32LE(2, 4);
+  header.writeUInt32LE(12 + 8 + jsonBuf.length + 8 + bin.length, 8);
+  const jsonHeader = Buffer.alloc(8);
+  jsonHeader.writeUInt32LE(jsonBuf.length, 0);
+  jsonHeader.writeUInt32LE(0x4e4f534a, 4);
+  const binHeader = Buffer.alloc(8);
+  binHeader.writeUInt32LE(bin.length, 0);
+  binHeader.writeUInt32LE(0x004e4942, 4);
+  return Buffer.concat([header, jsonHeader, jsonBuf, binHeader, bin]);
+}
+
+test.describe('Assets', () => {
+  test('imports a GLB model, places it, and keeps it after a reload', async ({ page }) => {
+    test.skip(test.info().project.name !== 'desktop-chromium', 'asset import flow is covered once');
+    await createProject(page, 'Asset World');
+    await page.locator('nav:visible').getByRole('button', { name: 'Assets' }).first().click();
+    const chooser = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Import files' }).first().click();
+    await (await chooser).setFiles({ name: 'Robot.glb', mimeType: 'model/gltf-binary', buffer: triangleGlb() });
+    const card = page.getByRole('article', { name: 'Robot' });
+    await expect(card).toBeVisible();
+    await expect(card).toContainText('1 tris');
+    await card.getByRole('button', { name: 'Add to scene' }).click();
+    await expect(page.getByTestId('tree-row-Robot')).toBeVisible();
+    await expect(page.getByTestId('save-status')).toContainText('Saved', { timeout: 20_000 });
+
+    await page.reload();
+    await page.getByRole('button', { name: 'Open Asset World' }).click();
+    await expect(page.getByTestId('tree-row-Robot')).toBeVisible();
+    await page.locator('nav:visible').getByRole('button', { name: 'Assets' }).first().click();
+    await expect(page.getByRole('article', { name: 'Robot' })).toBeVisible();
+  });
+
+  test('explains unsupported files instead of failing silently', async ({ page }) => {
+    test.skip(test.info().project.name !== 'desktop-chromium', 'covered once');
+    await createProject(page, 'Bad Files');
+    await page.locator('nav:visible').getByRole('button', { name: 'Assets' }).first().click();
+    const chooser = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Import files' }).first().click();
+    await (await chooser).setFiles({ name: 'car.fbx', mimeType: 'application/octet-stream', buffer: Buffer.from('not a model') });
+    await expect(page.getByText('Could not import car.fbx')).toBeVisible();
+    await expect(page.getByText(/Export your model as .glb/)).toBeVisible();
+  });
+});

@@ -30,11 +30,35 @@ on:
         description: "Xcode version to use, e.g. 16.4 (empty = newest stable on the runner)"
         type: string
         default: ''
+  # Automatic builds only when something that ends up in the app changes:
+  # macOS runner minutes are expensive on private repositories.
   push:
     branches: [main]
-    paths-ignore: ['**/*.md', 'docs/**']
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'ios/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'capacitor.config.ts'
+      - 'vite.config.ts'
+      - 'tsconfig*.json'
+      - 'scripts/**'
+      - '.github/workflows/ios-build.yml'
   pull_request:
-    paths-ignore: ['**/*.md', 'docs/**']
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'ios/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'capacitor.config.ts'
+      - 'vite.config.ts'
+      - 'tsconfig*.json'
+      - 'scripts/**'
+      - '.github/workflows/ios-build.yml'
 
 permissions:
   contents: read

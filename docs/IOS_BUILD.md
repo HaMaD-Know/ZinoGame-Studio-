@@ -32,7 +32,7 @@ build is uploaded separately as **`zinogame-studio-web-build`**.
    - **Xcode version**: leave empty to use the newest stable Xcode on the runner.
 4. Tap the green **Run workflow** button. A run takes roughly 10–15 minutes.
 
-The workflow also runs automatically on every push to `main` and on pull requests.
+The workflow also runs automatically on pushes to `main` and on pull requests that change the app (source, assets, iOS project, dependencies or build configuration). Documentation-only changes do not start a macOS build, because macOS runner minutes are expensive on private repositories.
 
 ## Downloading the result
 
