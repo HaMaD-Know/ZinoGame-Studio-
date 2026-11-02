@@ -567,7 +567,7 @@ class BlocksWriter {
   chain(list: Stmt[]): BlockState | undefined {
     let first: BlockState | undefined;
     let prev: BlockState | undefined;
-    for (const s of list) {
+    for (const s of splitMultilineComments(list)) {
       const b = this.stmt(s);
       if (!first) first = b;
       if (prev) prev.next = { block: b };
@@ -575,6 +575,19 @@ class BlocksWriter {
     }
     return first;
   }
+}
+
+/** Note blocks hold one line of text, so multi-line comments become several notes. */
+function splitMultilineComments<T extends Stmt | TopLevel>(list: T[]): T[] {
+  const out: T[] = [];
+  for (const s of list) {
+    if (s.kind === 'comment' && s.text.includes('\n')) {
+      s.text.split('\n').forEach((line, i) => out.push({ ...s, id: i === 0 ? s.id : undefined, text: line, block: false } as T));
+    } else {
+      out.push(s);
+    }
+  }
+  return out;
 }
 
 const VECTOR_CALLEES: Record<string, true> = { move: true, rotate: true, setPosition: true, setRotation: true, applyForce: true };
@@ -618,7 +631,7 @@ export function programToBlocks(program: Program): ProgramToBlocksResult {
     pendingTopLevel = [];
   };
 
-  for (const node of program.body) {
+  for (const node of splitMultilineComments(program.body)) {
     if (node.kind === 'var') {
       pendingTopLevel.push(writer.stmt({ kind: 'let', id: node.id, name: node.name, init: node.init }));
       continue;

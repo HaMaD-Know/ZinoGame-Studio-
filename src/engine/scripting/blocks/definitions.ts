@@ -391,7 +391,9 @@ export const BLOCK_DEFINITIONS: Json[] = [
   {
     type: 'zino_comment',
     message0: 'note: %1',
-    args0: [{ type: 'field_multilinetext', name: 'TEXT', text: '' }],
+    // field_input (core) — Blockly 12 moved the multi-line field to a plugin.
+    // Multi-line comments become one note block per line.
+    args0: [{ type: 'field_input', name: 'TEXT', text: '' }],
     previousStatement: null,
     nextStatement: null,
     colour: BLOCK_COLOURS.comment,

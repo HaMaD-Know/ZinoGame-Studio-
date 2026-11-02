@@ -358,3 +358,30 @@ describe('Blocks ⇄ IR conversion', () => {
     expect(compileScriptDoc(blocks).program).not.toBeNull();
   });
 });
+
+describe('Block definitions compatibility', () => {
+  // Fields that ship with Blockly core. Plugin-only fields (e.g. multi-line text) would
+  // silently drop user data on load, so they must never be used.
+  const CORE_FIELDS = new Set(['field_input', 'field_number', 'field_dropdown', 'field_checkbox', 'field_label', 'field_label_serializable', 'field_image', 'field_variable']);
+
+  it('only uses Blockly core field types', () => {
+    for (const def of BLOCK_DEFINITIONS) {
+      for (const key of Object.keys(def).filter((k) => k.startsWith('args'))) {
+        for (const arg of def[key] as { type: string }[]) {
+          if (arg.type.startsWith('field_')) expect(CORE_FIELDS.has(arg.type), `${String(def.type)} uses ${arg.type}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('keeps multi-line comments as several note blocks without losing text', () => {
+    const src = '/*\n first line\n second line\n*/\non start {\n  addScore(1)\n}\n';
+    const result = textToBlocks(src);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const text = blocksToText(result.blocks).text;
+    expect(text).toContain('first line');
+    expect(text).toContain('second line');
+    expect(text).toContain('addScore(1)');
+  });
+});

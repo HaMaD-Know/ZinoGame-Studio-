@@ -85,7 +85,8 @@ class Env {
   constructor(readonly parent: Env | null) {}
 
   lookup(name: string): Env | null {
-    for (let e: Env | null = this; e; e = e.parent) if (e.vars.has(name)) return e;
+    if (this.vars.has(name)) return this;
+    for (let e = this.parent; e; e = e.parent) if (e.vars.has(name)) return e;
     return null;
   }
 }

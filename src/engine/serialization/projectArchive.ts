@@ -91,9 +91,8 @@ export async function exportProjectArchive(
     const base = safeFileName(script.name, 'Script');
     const text = unique(`Scripts/${base}.zs`);
     put(text, strToU8(script.source));
-    let blocks: string | null = null;
     const meta = { id: script.id, name: script.name, mode: script.mode, blocks: script.blocks, textBackup: script.textBackup, createdAt: script.createdAt, updatedAt: script.updatedAt };
-    blocks = unique(`VisualScripts/${base}.zblocks`);
+    const blocks = unique(`VisualScripts/${base}.zblocks`);
     put(blocks, json(meta));
     index.scripts[script.id] = { text, blocks };
   }

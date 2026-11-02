@@ -67,6 +67,8 @@ const SELECT_COLOR = '#ff9f1c';
 const COLLIDER_COLOR = '#3ddc84';
 const TAP_MAX_MOVE = 8;
 const TAP_MAX_MS = 600;
+const HOME_POSITION = new Vector3(9, 7, 13);
+const HOME_TARGET = new Vector3(0, 1, 0);
 
 export class EditorViewport {
   readonly context: RenderContext;
@@ -131,14 +133,14 @@ export class EditorViewport {
     this.infiniteGrid.setWorldSpace(true);
     this.infiniteGrid.setSize(4000, 4000);
 
-    this.camera.position.set(18, 14, 26);
+    this.camera.position.copy(HOME_POSITION);
     this.orbit = new OrbitControls(this.camera, canvas);
     this.orbit.enableDamping = true;
     this.orbit.dampingFactor = 0.12;
     this.orbit.screenSpacePanning = true;
     this.orbit.maxDistance = 3000;
     this.orbit.minDistance = 0.5;
-    this.orbit.target.set(0, 0, 0);
+    this.orbit.target.copy(HOME_TARGET);
     this.orbit.addEventListener('change', () => {
       this.invalidate();
       this.scheduleCameraChange();
@@ -277,7 +279,7 @@ export class EditorViewport {
   }
 
   resetView(): void {
-    this.tweenCamera(new Vector3(18, 14, 26), new Vector3(0, 0, 0));
+    this.tweenCamera(HOME_POSITION.clone(), HOME_TARGET.clone());
   }
 
   getCameraState(): { position: Vec3; target: Vec3 } {
