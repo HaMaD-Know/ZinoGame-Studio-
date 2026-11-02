@@ -15,10 +15,13 @@ const BLOCKLY_MEDIA = fileURLToPath(new URL('./node_modules/blockly/media', impo
 function blocklyMedia(): Plugin {
   const types: Record<string, string> = { '.svg': 'image/svg+xml', '.png': 'image/png', '.gif': 'image/gif', '.cur': 'image/x-icon', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg' };
   let outDir = 'dist';
+  let isBuild = false;
   return {
     name: 'zino-blockly-media',
     configResolved(config) {
       outDir = config.build.outDir;
+      // Vitest also closes a Vite server (with a placeholder outDir): only copy for real builds.
+      isBuild = config.command === 'build' && !process.env.VITEST;
     },
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
@@ -31,7 +34,7 @@ function blocklyMedia(): Plugin {
       });
     },
     closeBundle() {
-      if (existsSync(BLOCKLY_MEDIA)) cpSync(BLOCKLY_MEDIA, join(outDir, 'blockly-media'), { recursive: true });
+      if (isBuild && existsSync(BLOCKLY_MEDIA)) cpSync(BLOCKLY_MEDIA, join(outDir, 'blockly-media'), { recursive: true });
     },
   };
 }

@@ -42,3 +42,4 @@ ios/App/output/
 xcuserdata/
 *.xcuserstate
 build-output/
+dummy-non-existing-folder/
