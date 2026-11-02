@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+*.tsbuildinfo
+coverage/
+test-results/
+playwright-report/
+blob-report/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.log
+
+# Local env
+.env
+.env.*
+!.env.example
+
+# Signing material must never be committed
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile
+*.keychain-db
+ExportOptions.local.plist
+
+# iOS (Capacitor) build products
+ios/App/build/
+ios/App/DerivedData/
+ios/App/Pods/
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/App/App/config.xml
+ios/App/output/
+xcuserdata/
+*.xcuserstate
+build-output/
