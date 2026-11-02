@@ -8,6 +8,7 @@ import {
   Focus,
   GripVertical,
   Group,
+  ListChecks,
   Lock,
   LockOpen,
   Pencil,
@@ -43,6 +44,8 @@ export function HierarchyPanel({ session, deps, onFocus }: { session: EditorSess
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ anchor: HTMLElement; obj: SceneObject } | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // Touch screens have no Shift/⌘ key, so multi-select is a toggle.
+  const [multi, setMulti] = useState(false);
   const listRef = useRef<HTMLUListElement>(null);
 
   const rows = useMemo(() => {
@@ -99,6 +102,13 @@ export function HierarchyPanel({ session, deps, onFocus }: { session: EditorSess
       <div className="panel-header">
         <h2>Objects</h2>
         <span className="chip">{scene.objects.length}</span>
+        <IconButton
+          icon={ListChecks}
+          label={multi ? 'Stop selecting several' : 'Select several'}
+          size="sm"
+          active={multi}
+          onClick={() => setMulti((m) => !m)}
+        />
       </div>
       <div style={{ padding: '10px 10px 4px' }}>
         <SearchInput value={query} onChange={setQuery} placeholder="Search objects" label="Search objects" />
@@ -144,7 +154,7 @@ export function HierarchyPanel({ session, deps, onFocus }: { session: EditorSess
                   data-testid={`tree-row-${o.name}`}
                   tabIndex={selected ? 0 : -1}
                   style={{ paddingLeft: 4 + depth * 18 }}
-                  onClick={(e) => session.select([o.id], e.shiftKey || e.metaKey || e.ctrlKey)}
+                  onClick={(e) => session.select([o.id], multi || e.shiftKey || e.metaKey || e.ctrlKey)}
                   onDoubleClick={() => !playing && setRenaming(o.id)}
                   onContextMenu={(e) => {
                     e.preventDefault();

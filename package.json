@@ -16,11 +16,12 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --project=desktop-chromium --project=ipad-landscape-chromium --project=ipad-portrait-chromium",
     "check": "npm run typecheck && npm run lint && npm run test && npm run build:web",
     "check:capacitor": "node scripts/validate-capacitor.mjs --require-build",
     "cap:sync": "cap sync ios",
-    "ios:build": "npm run build && cap sync ios"
+    "ios:build": "npm run build && cap sync ios",
+    "test:e2e:webkit": "PW_WEBKIT=1 playwright test --project=ipad-webkit"
   },
   "dependencies": {
     "@capacitor/app": "8.1.2",
